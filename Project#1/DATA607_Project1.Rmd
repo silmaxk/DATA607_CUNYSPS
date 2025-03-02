@@ -1,0 +1,179 @@
+---
+title: "DATA607_Project1"
+author: "Silma"
+date: "2025-02-25"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# DATA 607 Project 1
+## Silma Khan
+### SPRING 2025
+
+For this project, we are tasked with needing to read a .txt file titled (tournamentinfo.txt) that contains records for each chess player. These records are broken up to using two line for each chess player and for this project, we need to extract:
+
+- Player's Name : which is from the first line
+- Player's State : which is in abbreviated form found in the second line
+- Total Number of Points : which is from the first line
+- Player's Pre-Rating : which is from the second line, specifically in the rating information
+- Average Pre Chess Rating of Opponents : which we have to **compute** using the opponents pair numbers listed in the rounds (found in the first line) and then looking for each opponents pre-rating from their own record, and then **averaging** those ratings
+
+So with this new information, the first record should look like:
+
+- Gary Hua, ON, 6.0, 1794, 1605
+
+In order to complete these steps, we need to first import the necessary libraries in order to precess the string and to manipulate data
+
+```{r}
+library(stringr)
+library(dplyr)
+```
+
+Now that we have our necessary libraries, we now need to read and clean the data
+
+First we need to read the tournamentinfo.txt file as a plain text, then we need to remove the header and separator lines, so only the player records are present
+- **Remember that the player info is given in two lines**
+
+To make this accessible to others, I added the file to my github and I am able to load it without the empty spaces or the first row that contains only dashed lines
+
+```{r}
+df <- read.csv("https://raw.githubusercontent.com/silmaxk/DATA607_CUNYSPS/refs/heads/main/Project%231/tournamentinfo.txt", header = F, skip = 1, strip.white = T)
+head(df)
+```
+Now taking a look at the dataframe, we can see that there are still dashed lines every third line, so we can remove those as well
+
+```{r}
+df <- data.frame(df[-seq(0,nrow(df),3), ], "")
+
+head(df)
+```
+
+Now that we removed the dashed lines, we can move onto dealing with the players information being split into two lines
+
+There are multiple ways at handling this, but we can concatenate the two lines together, to make it one row for each players information:
+
+```{r}
+# Step 4: Combine the two lines for each player into one record.
+# First, split the dataframe into odd and even rows.
+odd_rows <- df[(seq(nrow(df)) %% 2) == 1, ]
+even_rows <- df[(seq(nrow(df)) %% 2) == 0, ]
+
+# Combine the corresponding odd and even rows side by side.
+df1 <- data.frame(cbind(odd_rows, even_rows))
+
+# Remove any extra columns (if present) that came from the read process.
+if("X...1" %in% names(df1)) df1$X...1 <- NULL
+if("X.." %in% names(df1)) df1$X.. <- NULL
+
+# Concatenate the two columns into a single character vector.
+df1 <- paste(df1[,1], df1[,2])
+
+df1
+```
+Now with the player informations all being in a single row, we can now move onto extracting the player information
+
+Looking at the dataframe, we can see that each field in each record is separated by the "|" character. Using this information we can split each string and trim the white space
+
+Also it seems like the original header is taking up space as the first row, which can hinder our results, so we need to remove those as well
+
+```{r}
+df1 <- df1[-1]
+```
+
+
+```{r}
+#split each record by the pipe symbol
+split_data <- str_split(df1, "\\|")
+
+#create a data frame extracting the fields we need.
+players <- data.frame(
+  pair = as.numeric(trimws(sapply(split_data, `[`, 1))),
+  name = trimws(sapply(split_data, `[`, 2)),
+  total_points = as.numeric(trimws(sapply(split_data, `[`, 3))),
+  state = trimws(sapply(split_data, `[`, 11)),
+  rating_info = trimws(sapply(split_data, `[`, 12)),
+  stringsAsFactors = FALSE
+)
+
+players
+```
+
+By creating a new dataframe called players in this case, we were able to extract the fields that we need 
+
+Now we can move onto extracting the pre-rating from the rating information
+
+The rating info is a little awkward since it contains text like **15445895 / R: 1794 ->1817** so we need to make sure we extract the number that comes right after "R:"
+
+```{r}
+players <- players %>%
+  mutate(pre_rating = as.numeric(str_match(rating_info, "R:\\s*(\\d+)")[,2]))
+```
+
+Using this regex method, it looks for digits after the "R:" and any optional spaces, it than converts the extracted text to numerical values
+
+Now we can move onto extracting the opponent pair numbers from the round data
+
+Looking at the data, we can see that the round data contains results like **"W 39"** or **"D 12"**. We only need to extract the numerical part for each round. To do this, we need to add a new list column to our data frame
+
+```{r}
+#we can create a new list column by extrcating opponents IDs
+players$opponents <- lapply(split_data, function(x) {
+  #extract fields 4 to 10 these contain the roud results for each players
+  round_fields <- x[4:10]
+  #extract the numeric part for each round result
+  opps <- sapply(round_fields, function(field) as.numeric(str_extract(field, "\\d+")))
+  #remove any null/empty values
+  opps <- opps[!is.na(opps)]
+  return(opps)
+})
+
+print(players)
+```
+
+Now we need to ocmpute the Average Pre-Chess rating for the opponents using this information
+
+For each player we need to look up each opponents pre rating by using their unique pair number and compute the average. We can do this by using a loop
+
+```{r}
+#initialize a new column for average opponent rating
+players$opp_avg <- NA_real_
+
+#we can loop through each player
+for(i in 1:nrow(players)){
+  opp_ids <- players$opponents[[i]]
+  if(length(opp_ids) > 0) {
+    #for each opponent we need to find the corresponding pre_rating by matching the pair number
+    opp_ratings <- sapply(opp_ids, function(id) {
+      idx <- which(players$pair == id)
+      if(length(idx) > 0) {
+        return(players$pre_rating[idx])
+      } else {
+        return(NA_real_)
+      }
+    })
+    #compute the average opponent pre-rating
+    players$opp_avg[i] <- mean(opp_ratings, na.rm = TRUE)
+  }
+}
+
+head(players)
+```
+
+Now that we have all the necessary columns and calculations complete, we can now create the final output and write it to a CSV
+
+```{r}
+#select the final output columns
+final_output <- players %>%
+  select(name, state, total_points, pre_rating, opp_avg)
+
+#write the final output to a CSV file
+write.csv(final_output, "tournament_results.csv", row.names = FALSE)
+
+final_output
+```
+
+
+
+
+
