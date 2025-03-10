@@ -1,0 +1,363 @@
+---
+title: "DATA607_Project2"
+author: "Silma"
+date: "2025-03-03"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# DATA 607 Data Acquisition & Management
+## Project 2 - Data Transformation
+### Silma Khan SPRING 2025
+
+>Your task is to:
+
+> Choose any three of the “wide” datasets identified in the Week 4 Discussion items. (You may use your own dataset; please don’t use my Sample Post dataset, since that was used in your Week 4 assignment!) For each of the three chosen datasets:
+
+>  Create a .CSV file (or optionally, a MySQL database!) that includes all of the information included in the dataset. You’re encouraged to use a “wide” structure similar to how the information appears in the discussion item, so that you can practice tidying and transformations as described below.
+
+> Read the information from your .CSV file into R, and use tidyr and dplyr as needed to tidy and transform your data. [Most of your grade will be based on this step!]
+
+> Perform the analysis requested in the discussion item
+
+> Your code should be in an R Markdown file, posted to rpubs.com, and should include narrative descriptions of your data cleanup work, analysis, and conclusions. 
+
+In this project, we will work with three datasets that are not considered to be "tidy" data or in a "tidy" format. Tidy data follows the principle that each variable should have its own column and each observation has its own row. When data is untidy, it can lead to challenges when trying to perform some analysis on the data because the information is spread across multiple columns or compressed into a single cell.
+
+For this project, I decided to use these three untidy datasets:
+- rolling_stone.csv Rolling Stone Dataset
+- cola.xlxs - Coca Cola Sales Dataset
+- Uncleaned_DS_jobs.csv - Data Science Jobs Dataset (from Glassdor)
+
+Each of these datasets is untidy for different reason and we will cover the reasons why as we walk through our cleaning or tidying of the data. 
+
+**rolling_stone.csv:**
+- This dataset came from the "tidytuesday" githib repo that collects untidy datasets that have information about artists and their albums and how the albums have ranked throughout the years 2002, 2012, and 2020. The dataset also contains information about thr artists and type of music produced
+
+Link: https://github.com/rfordatascience/tidytuesday/blob/main/data/2024/2024-05-07/rolling_stone.csv
+
+**cola.xlxs:**
+- This dataset is collected from kaggle and contains information regarding Coca Cola sales and their profit and loss
+
+Link: https://www.kaggle.com/datasets/shivavashishtha/dirty-excel-data?resource=download
+**Uncleaned_DS_jobs.csv:**
+- This dataset contains information regarding data science jobs that were scrapped from Glassdoor's website. This is the uncleaned version, so the data that was direcly pulled from the website, without any cleaning work done to it
+
+Link: https://www.kaggle.com/datasets/rashikrahmanpritom/data-science-job-posting-on-glassdoor?select=Uncleaned_DS_jobs.csv
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(ggfortify)
+```
+#### Rolling Stone Dataset
+
+The **rolling_stone.csv** file is accessed directly from my github repo for this project and can also be found using the github link provided above. 
+
+This dataset is considered to be untidy because it includes duplicate columns for the artist's name in two different columns. Additionally, it holds ranking data in three separate columns. Rather than having separate columns for each years rank, tidy data should have a single "Rank" column with a corresponding "Year" column. This structure makes it challenging to compare rankings across years without reshaping the data.
+
+```{r}
+rolling <- read_csv("https://raw.githubusercontent.com/silmaxk/DATA607_CUNYSPS/refs/heads/main/Project%232/rolling_stone.csv")
+head(rolling)
+```
+
+- **Tidying Data:**
+
+1. Remove duplicate Artists Name: Since "sort_name" and "clean_name" represent the same information, we can choose to keep one, while removing the other. In this case, we will keep "clean_name" as it sets the name already to be in a readable format without unecessary punctuation 
+
+2. Pivot rank column: We reshape the three rank columns into a long format that produces a "Year: column that will hold values 2003, 2012, and 2020) and a "Rank" column
+
+```{r}
+rolling_tidy <- rolling %>%
+  select(-sort_name) %>%   #removing the duplicate column and just keeping "clean_name"
+  pivot_longer(
+    cols = starts_with("rank_"),   #select columns that begin with "rank_" to make it faster to deal with
+    names_to = "year",             #creating a new column that will hold the year information
+    names_prefix = "rank_",        #removing the "rank_" prefix from the year values
+    values_to = "rank"             #creating a new column for the rank values
+  ) %>%
+  filter(!is.na(rank))             #removing any rows with missing rank values
+
+head(rolling_tidy)
+```
+
+Now, we can see that this new updated tidy dataset only has one column with the artists name and now two columns, one titled "year" and another titled "rank" that has broken down the three columns holding rank values and have transformed it into a long data format.
+
+- **Analysis:**
+
+Using this new tidy version of data, we can now begin got perform some analysis on the data. For this project, I will be answering these questions:
+- What is the average rank per year?
+- Which genres are consistently ranked the highest?
+- Which artists have the most albums on the list?
+
+```{r}
+#What is the average rank per year?
+
+avg_rank <- rolling_tidy %>%
+  group_by(year) %>%
+  summarize(avg_rank = mean(rank, na.rm = TRUE))
+
+avg_rank_year <- ggplot(avg_rank, aes(x = as.numeric(year), y = avg_rank)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Average Rank Over Years",
+       x = "year",
+       y = "Average Rank")
+
+autoplot(avg_rank_year)
+```
+```{r}
+#Which genres are consistently ranked the highest?
+
+genre_rank <- rolling_tidy %>%
+  group_by(genre) %>%
+  summarize(avg_rank = mean(rank, na.rm = TRUE)) %>%
+  arrange(avg_rank)
+
+genre_rank
+```
+
+```{r}
+p_genre <- ggplot(genre_rank, aes(x = reorder(genre, avg_rank), y = avg_rank)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Average Rank by Genre",
+       x = "Genre",
+       y = "Average Rank")
+autoplot(p_genre)
+```
+
+```{r}
+#Which artists have the most albums on the list?
+
+artist_album_count <- rolling %>%
+  group_by(clean_name) %>%
+  summarize(album_count = n_distinct(album)) %>%
+  arrange(desc(album_count))
+
+artist_album_count
+```
+
+```{r}
+top_artists <- artist_album_count %>% top_n(10, album_count)
+p_artist <- ggplot(top_artists, aes(x = reorder(clean_name, album_count), y = album_count)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Top 10 Artists with Most Albums on the List",
+       x = "Artist",
+       y = "Number of Albums")
+autoplot(p_artist)
+```
+
+By tidying this dataset and by removing that one column and changing those three different columns into two, we were able to perform strong analysis on the dataset to find some insights.
+
+#### Cola Dataset
+
+This Coca Cola dataset stores quarterly sales data across multiple columns. I tried to go outside of my comfort zone and work with an excel file for this project, also with data that have data stored in multiple columns and are put into a very computer un-friendly way. 
+
+This dataset contains sales data for different cola brands as well that are spread across separate columns. 
+
+This dataset has several issues that make it untidy:
+
+1. We have separate year columns (ex. FY '09) which should be converted into a single "year" variable
+2. Some summarization rows (ex. totals, sub_totals) may appear in the data and should either be removed or retained as a separate category
+3. Some categories, such as "Cost of goods sold" appear as row labels, but should become a variable "Category"
+
+- **Reading the Data:**
+
+Messy excel files have headers, footers, or multiple tables in one sheet, so to avoid this we can use the read_excel() function with the range argument to isolate the table that I need
+
+In this case, I only want to focus on the "Profit and Loss" portion of the data, so depending on which portion of the data that falls in for the excel sheet, we can isolate just that
+
+```{r}
+cola_profloss <- read_excel("Cola.xlsx", range = "A3:K10", col_names = TRUE)
+
+cola_profloss
+```
+
+Taking a look at this and given the output, the first row and columns contain extra headings rather than clean column and values. We need to:
+1. Remove the first row
+2. Use the new first row as column names
+3. Rename the columns
+4. Pivot from a wide format to a long format (by changing the years to become a single year column)
+5. We need to parse the year strings into a numeric year
+
+```{r}
+#convert data to a tibble for easier manipulation and remove the first row since it is unecessary
+cola_profloss <- as_tibble(cola_profloss)
+
+cola_profloss <- cola_profloss[ , -1]
+
+cola_profloss
+```
+```{r}
+#use the new first row as column names
+
+colnames(cola_profloss) <- as.character(cola_profloss[1, ])
+
+cola_profloss
+```
+```{r}
+#since we used the first row as column names, we can now remove that row from the data
+cola_profloss <- cola_profloss[-1, ]
+
+cola_profloss
+```
+
+```{r}
+cola_profloss <- cola_profloss %>%
+  rename(Category = `in million USD`)
+
+cola_profloss
+```
+
+```{r}
+cola_profloss_tidy <- cola_profloss %>%
+  pivot_longer(
+    cols = starts_with("FY"),
+    names_to = "Year",
+    values_to = "Value"
+  )
+
+cola_profloss_tidy
+```
+
+```{r}
+cola_profloss_tidy <- cola_profloss_tidy %>%
+  mutate(
+    Year = str_remove(Year, "FY "),   #remove "FY "
+    Year = str_remove_all(Year, "'"), #remove symbols
+    Year = as.numeric(Year),         #convert to numeric
+    Year = if_else(Year < 30, 2000 + Year, 1900 + Year)
+  )
+
+cola_profloss_tidy
+```
+
+- **Analysis:**
+
+For my analysis, I will create a bar plot to compare the values of each category in the most recent year
+
+```{r}
+latest_year_data <- cola_profloss_tidy %>%
+  filter(Year == max(Year, na.rm = TRUE))
+
+p_bar <- ggplot(latest_year_data, aes(x = reorder(Category, Value), y = Value)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(
+    title = paste("Category Values in", max(latest_year_data$Year)),
+    x = "Category",
+    y = "Value (Millions USD)"
+  )
+p_bar
+```
+
+By tidying the dataset, we are able to understand the data more and obtain stornger analysis on it depending on what type of information we are trying to see.
+
+#### Data Science Jobs Dataset
+
+The Uncleaned_DS_jobs.csv file is accessible through my github repo which contains job posting data for Data Science jobs posted on Glassdoor that was web scraped into a csv file. 
+
+This dataset is untidy because:
+- The Salary Estimate column often includes a rage with symbols rather than seprate min/max numeric values
+- The Location column can contain both city and state in one cell rather than having a separate columns for each
+- The Job Description column has extremely long text that may contain multiples lines, symbols, and repeated content
+- There are other columns that may not be necessary for some analysis
+
+- **Load Data:**
+
+```{r}
+library(stringr)
+```
+
+```{r}
+ds_jobs <- read_csv("https://raw.githubusercontent.com/silmaxk/DATA607_CUNYSPS/refs/heads/main/Project%232/Uncleaned_DS_jobs.csv")
+
+head(ds_jobs)
+```
+```{r}
+glimpse(ds_jobs)
+```
+
+- **Tidying Data:**
+
+```{r}
+jobs_clean <- ds_jobs %>%
+  mutate(
+    Salary_Clean = str_remove_all(`Salary Estimate`, "\\$|K|\\(.*\\)"),
+    Salary_Min = as.numeric(str_extract(Salary_Clean, "^[0-9]+")),
+    Salary_Max = as.numeric(str_extract(Salary_Clean, "(?<=-)[0-9]+"))
+  )
+
+jobs_clean %>% select(`Job Title`, `Salary Estimate`, Salary_Min, Salary_Max) %>% head()
+```
+
+```{r}
+jobs_clean <- jobs_clean %>%
+  separate(Location, into = c("City", "State"), sep = ", ", fill = "right", extra = "merge")
+
+jobs_clean %>% select(`Job Title`, City, State) %>% head()
+```
+
+```{r}
+jobs_clean <- jobs_clean %>%
+  select(-index, -Competitors, -Headquarters)  # remove columns you don't need
+
+colnames(jobs_clean)
+```
+
+```{r}
+jobs_clean <- jobs_clean %>%
+  mutate(`Job Description` = str_squish(`Job Description`))
+
+jobs_clean %>% select(`Job Description`) %>% head(1)
+```
+
+- **Analysis:**
+
+Now that we have cleaned the data, we can now do some analysis on the data. For example, we can see which states have the most job postings
+
+```{r}
+state_counts <- jobs_clean %>%
+  filter(!is.na(State)) %>%
+  count(State, sort = TRUE)
+
+head(state_counts, 10)
+```
+```{r}
+top_states <- head(state_counts, 10)
+
+p_states <- ggplot(top_states, aes(x = reorder(State, n), y = n)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Top 10 States with DS Job Postings",
+       x = "State",
+       y = "Number of Postings")
+
+autoplot(p_states)
+```
+Taking a look at this analysis, we can see that California has a significant amount of job listings for Data Science
+
+#### Conclusion
+
+Throughout this project, we were able to examine three untidy datasets and performed comprehensive data tidying, transformation to make the data tidy and performed some analysis on the dataset
+
+1. **Rolling Stone Dataset:**
+  - We had multiple rank columns across different years and duplicate artist name columns
+  - We removed repeated columns, pivoted the rank columns into a single "Rank" column with the associated "Year" variable and this allowed us to easily compare and analyze how rankings change over time as well as identify which genres and artists were most popular
+  
+2. **Cola Dataset:**
+  - The financial data was spread across multiple columns for different years and line item categories stored as row labels
+  - We were able to identify the relevant range of cells in an excel file, removed the headers, and pivoted the wide format into a tidy structure creating a single year column and a value column while still keeping line items under the category column. Once we tidied the data, we were able to perform statistical analysis and visualized the trend across the most recent year
+  
+3. **Data Science Jobs Dataset:**
+  - In this dataset we had complex text fields, and numerical observations in a string format and combined location data in a single column
+  - We were able to manipulate the tring to parse through the salary ranges into a minimum and maximumm numerical column, split the location data into two separate columns for city and state, and removed the extra text in the job description data. These transformations allowed us to perform some analysis on the data such as finding the top 10 states with the most data science job postings
+  
+By following the rules for having tidy data, each dataset was transformed from an untidy, wide structure, into a clear and consistent format that allows for deeper and stronger statistical analysis and visualizations
+
+
+
+
